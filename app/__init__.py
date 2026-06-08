@@ -3,7 +3,7 @@
 from .config import DEFAULT_CONFIG, ensure_logging_dir, load_config
 from .audio_capture import AudioCapture
 from .transcribe import TranscriptionWorker, TranscriptionResult
-from .hotkeys import HotkeyManager
+from .hotkeys import HotkeyManager  # noqa: F401 — kept for Windows/Linux compatibility
 from .output import type_text
 
 __all__ = [
