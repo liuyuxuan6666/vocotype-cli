@@ -310,7 +310,7 @@ else:
     _LINUX_METHOD_ORDER = {
         "wtype": ["wtype", "clipboard"],
         "clipboard": ["clipboard", "wtype"],
-        "auto": ["wtype", "clipboard"],
+        "auto": ["clipboard", "wtype"],
     }
 
 
