@@ -113,6 +113,7 @@ Hyprland F2  →  toggle.sh  →  kill -USR1 $(cat /tmp/vocotype.pid)
 1. VAD 未开启 → 确认 `FUNASR_USE_VAD=true` 且启动日志包含 "VAD ONNX模型加载完成"
 2. 麦克风增益过高导致削波 → 降至 60% 左右
 3. 配置中 `"use_vad": true` 和 `"use_punc": true` 未设
+4. **丢字？** 旧版 VAD 仅打日志未做音频切割。本次已修复：VAD 检测语音段 → 切割 → 仅喂语音段给 ASR。确认日志出现 "VAD处理完成，检测到 X 个语音段" 和 "VAD音频分段完成"
 
 ## 下载
 

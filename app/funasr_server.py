@@ -412,10 +412,46 @@ class FunASRServer:
                 default_options.update(options)
 
             # 执行语音识别（VAD 处理）
+            _vad_temp_path = None
             if default_options["use_vad"] and self.vad_model:
-                # funasr_onnx.Fsmn_vad 直接调用，返回 segments [[start_ms, end_ms], ...]
-                vad_result = self.vad_model(audio_path)
-                logger.info("VAD处理完成，检测到 %s 个语音段", len(vad_result[0]) if vad_result else 0)
+                try:
+                    # funasr_onnx.Fsmn_vad 直接调用，返回 segments [[start_ms, end_ms], ...]
+                    vad_result = self.vad_model(audio_path)
+                except Exception as exc:
+                    logger.warning("VAD检测失败，使用原始音频: %s", exc)
+                    vad_result = None
+
+                if vad_result and len(vad_result) > 0 and len(vad_result[0]) > 0:
+                    segments = vad_result[0]
+                    logger.info("VAD处理完成，检测到 %s 个语音段", len(segments))
+
+                    # 用 VAD 段切割音频，只保留语音部分
+                    import tempfile
+                    import soundfile as sf
+                    import numpy as np
+
+                    speech_audio, sr = sf.read(audio_path)
+                    speech_frames = []
+                    for seg in segments:
+                        start_sample = int(seg[0] * sr / 1000)
+                        end_sample = int(seg[1] * sr / 1000)
+                        start_sample = max(0, start_sample)
+                        end_sample = min(len(speech_audio), end_sample)
+                        if start_sample < end_sample:
+                            speech_frames.append(speech_audio[start_sample:end_sample])
+
+                    if speech_frames:
+                        combined = np.concatenate(speech_frames)
+                        fd, _vad_temp_path = tempfile.mkstemp(suffix="_vad.wav")
+                        os.close(fd)
+                        sf.write(_vad_temp_path, combined, sr)
+                        audio_path = _vad_temp_path  # 用分段后的音频替换原路径
+                        logger.info("VAD音频分段完成: %d 段合并为 %.2fs",
+                                    len(segments), len(combined) / sr)
+                    else:
+                        logger.warning("VAD未提取到有效语音段")
+                else:
+                    logger.warning("VAD未检测到语音段，使用原始音频")
             elif default_options["use_vad"] and not self.vad_model:
                 logger.warning("use_vad=True 但VAD模型未加载，跳过VAD处理")
 
@@ -499,6 +535,13 @@ class FunASRServer:
             logger.error(error_msg)
             logger.error(traceback.format_exc())
             return {"success": False, "error": error_msg, "type": "transcription_error"}
+        finally:
+            # 清理 VAD 分段临时文件
+            if _vad_temp_path is not None:
+                try:
+                    os.remove(_vad_temp_path)
+                except OSError:
+                    pass
 
     def _get_audio_duration(self, audio_path):
         """获取音频时长"""
