@@ -432,11 +432,12 @@ class FunASRServer:
 
                     speech_audio, sr = sf.read(audio_path)
                     speech_frames = []
+                    # 每端延伸 200ms 避免切掉语音段首尾
+                    _pad_ms = 200
+                    _pad_samples = int(_pad_ms * sr / 1000)
                     for seg in segments:
-                        start_sample = int(seg[0] * sr / 1000)
-                        end_sample = int(seg[1] * sr / 1000)
-                        start_sample = max(0, start_sample)
-                        end_sample = min(len(speech_audio), end_sample)
+                        start_sample = max(0, int(seg[0] * sr / 1000) - _pad_samples)
+                        end_sample = min(len(speech_audio), int(seg[1] * sr / 1000) + _pad_samples)
                         if start_sample < end_sample:
                             speech_frames.append(speech_audio[start_sample:end_sample])
 
