@@ -112,62 +112,37 @@ class FunASRServer:
         return "cpu"
 
     def _load_asr_model(self):
-        """加载ASR模型"""
+        """加载ASR模型 — 根据模型名自动选择 ONNX 或 PyTorch"""
         try:
             model_name_lower = str(self.model_names["asr"]).lower()
-            
-            # 如果是 ONNX 模型，使用 funasr_onnx 专用加载器
+
             if "onnx" in model_name_lower:
-                from funasr_onnx.paraformer_bin import Paraformer
+                return self._load_asr_onnx()
 
-                logger.info("开始加载ASR ONNX模型: %s", self.model_names["asr"])
-                try:
-                    model_dir = get_model_cache_path(
-                        self.model_names["asr"],
-                        self.model_revision
-                    )
-                except Exception as e:
-                    logger.error("下载 ASR ONNX 模型失败: %s", e)
-                    return False
+            # ---- PyTorch 全精度模型 ------------------------------------------
+            from funasr import AutoModel
 
-                # 基本完整性校验，优先使用量化模型
-                quant_file = os.path.join(model_dir, "model_quant.onnx")
-                base_file = os.path.join(model_dir, "model.onnx")
-                use_quantize = False
-                if os.path.exists(quant_file):
-                    use_quantize = True
-                elif not os.path.exists(base_file):
-                    logger.error("ASR 模型目录缺少 model.onnx: %s", model_dir)
-                    return False
+            logger.info("开始加载 ASR PyTorch 全精度模型: %s", self.model_names["asr"])
 
-                device_id = -1  # CPU
-                if self.device and "cuda" in self.device:
-                    try:
-                        device_id = int(self.device.split(":")[-1])
-                    except Exception:
-                        device_id = 0
-                
-                # 性能优化参数
-                num_threads = int(os.environ.get("OMP_NUM_THREADS", "8"))
+            # funasr.AutoModel 内置 VAD，无需额外配置
+            model_kwargs = {
+                "model": self.model_names["asr"],
+                "device": self.device or "cpu",
+                "disable_update": True,
+            }
 
-                self.asr_model = Paraformer(
-                    str(model_dir),
-                    batch_size=1,
-                    device_id=device_id,
-                    quantize=use_quantize,
-                    intra_op_num_threads=num_threads,  # 线程并行加速
-                )
-                logger.info("ASR ONNX模型加载完成")
-                return True
-            else:
-                logger.error("仅支持 ONNX 模型加载，当前模型名称: %s", self.model_names["asr"]) 
-                return False
-                
+            self.asr_model = AutoModel(**model_kwargs)
+            logger.info("ASR PyTorch 模型加载完成")
+            return True
+
         except Exception as e:
             logger.error(f"ASR模型加载失败: {str(e)}")
             logger.debug(traceback.format_exc())
             self.asr_model = None
             return False
+
+    def _load_asr_onnx(self):
+        """加载 ONNX 量化模型（原有逻辑）"""
 
     def _load_vad_model(self):
         """加载VAD模型（使用 funasr_onnx 专用加载器）"""
@@ -276,21 +251,25 @@ class FunASRServer:
             logger.info("正在并行初始化FunASR模型...")
             start_time = time.time()
 
-            # 预导入 funasr_onnx 子模块，避免多线程导入导致的 ModuleLock 死锁
-            try:
-                import importlib
-                pre_modules = (
-                    "funasr_onnx.utils.utils",
-                    "funasr_onnx.utils.frontend",
-                    "funasr_onnx.paraformer_bin",
-                    "funasr_onnx.vad_bin",
-                    "funasr_onnx.punc_bin",
-                )
-                for m in pre_modules:
-                    importlib.import_module(m)
-                logger.info("funasr_onnx 模块预导入完成")
-            except Exception as pre_e:
-                logger.warning("funasr_onnx 预导入失败: %s", str(pre_e))
+            # 判断模型类型
+            _is_onnx = "onnx" in str(self.model_names["asr"]).lower()
+
+            # ONNX 模式：预导入 funasr_onnx 子模块，避免多线程 ModuleLock 死锁
+            if _is_onnx:
+                try:
+                    import importlib
+                    pre_modules = (
+                        "funasr_onnx.utils.utils",
+                        "funasr_onnx.utils.frontend",
+                        "funasr_onnx.paraformer_bin",
+                        "funasr_onnx.vad_bin",
+                        "funasr_onnx.punc_bin",
+                    )
+                    for m in pre_modules:
+                        importlib.import_module(m)
+                    logger.info("funasr_onnx 模块预导入完成")
+                except Exception as pre_e:
+                    logger.warning("funasr_onnx 预导入失败: %s", str(pre_e))
 
             # 创建加载结果存储
             results = {}
@@ -302,11 +281,9 @@ class FunASRServer:
                 thread_time = time.time() - thread_start
                 logger.info(f"{model_name}模型加载线程耗时: {thread_time:.2f}秒")
 
-            # 根据开关决定是否加载 VAD / PUNC（默认启用）
-            load_vad = os.environ.get("FUNASR_USE_VAD", "false").lower() not in ("0", "false", "no")
+            # 创建并启动线程
+            # 无论 ONNX/PyTorch 都加载标点模型
             load_punc = os.environ.get("FUNASR_USE_PUNC", "true").lower() not in ("0", "false", "no")
-
-            # 创建并启动线程（ASR 必须，VAD/PUNC 可选）
             threads = [
                 threading.Thread(
                     target=load_model_thread,
@@ -314,14 +291,16 @@ class FunASRServer:
                     daemon=True,
                 )
             ]
-            if load_vad:
-                threads.append(
-                    threading.Thread(
-                        target=load_model_thread,
-                        args=("vad", self._load_vad_model),
-                        daemon=True,
+            if _is_onnx:
+                load_vad = os.environ.get("FUNASR_USE_VAD", "false").lower() not in ("0", "false", "no")
+                if load_vad:
+                    threads.append(
+                        threading.Thread(
+                            target=load_model_thread,
+                            args=("vad", self._load_vad_model),
+                            daemon=True,
+                        )
                     )
-                )
             if load_punc:
                 threads.append(
                     threading.Thread(
@@ -454,7 +433,10 @@ class FunASRServer:
                 else:
                     logger.warning("VAD未检测到语音段，使用原始音频")
             elif default_options["use_vad"] and not self.vad_model:
-                logger.warning("use_vad=True 但VAD模型未加载，跳过VAD处理")
+                # PyTorch AutoModel 内置 VAD，无需手动切割
+                _is_pytorch = hasattr(self.asr_model, "generate")
+                if not _is_pytorch:
+                    logger.warning("use_vad=True 但VAD模型未加载，跳过VAD处理")
 
             # 执行ASR识别（根据模型类型使用不同接口）
             if hasattr(self.asr_model, "generate"):
@@ -488,6 +470,12 @@ class FunASRServer:
                 raw_text = str(asr_result)
 
             logger.info(f"ASR识别完成，原始文本: {raw_text[:100]}...")
+
+            # PyTorch AutoModel 输出含字符间空格（"所 以 午 睡"）→ 清理
+            if hasattr(self.asr_model, "generate") and " " in raw_text.strip():
+                cleaned = raw_text.replace(" ", "")
+                if cleaned:
+                    raw_text = cleaned
 
             # 使用标点恢复（ONNX 的 CT_Transformer 直接调用）
             final_text = raw_text

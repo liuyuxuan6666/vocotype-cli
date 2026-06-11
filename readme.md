@@ -110,10 +110,37 @@ Hyprland F2  →  toggle.sh  →  kill -USR1 $(cat /tmp/vocotype.pid)
 3. 配置文件正确使用了 `"device": "pulse"`（而非空的默认值，避免 ALSA hw 设备）
 
 **识别效果差？** 可能原因：
-1. VAD 未开启 → 确认 `FUNASR_USE_VAD=true` 且启动日志包含 "VAD ONNX模型加载完成"
-2. 麦克风增益过高导致削波 → 降至 60% 左右
-3. 配置中 `"use_vad": true` 和 `"use_punc": true` 未设
-4. **丢字？** 旧版 VAD 仅打日志未做音频切割。本次已修复：VAD 检测语音段 → 切割 → 仅喂语音段给 ASR。确认日志出现 "VAD处理完成，检测到 X 个语音段" 和 "VAD音频分段完成"
+1. **使用 int8 量化 ONNX 模型（默认）精度有限** → 升级到 PyTorch 全精度模型（见下方）
+2. VAD 未开启 → 启动日志确认包含 "VAD ONNX模型加载完成"（ONNX模式）或 "ASR PyTorch 模型加载完成"
+3. 麦克风增益过高导致削波 → 降至 60% 左右
+4. **丢字？** 已修复：VAD 检测语音段 → 切割 → 仅喂语音段给 ASR。确认日志包含 "VAD处理完成，检测到 X 个语音段"
+
+### 升级到 PyTorch 全精度模型（推荐）
+
+默认使用 **int8 量化 ONNX 模型**（227MB，`model_quant.onnx`）以节省内存和加载时间，但精度有损失。如需更高识别准确率，可切换到 PyTorch 全精度模型（944MB）：
+
+```bash
+# 1. 安装 PyTorch CPU + torchaudio
+uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+uv pip install torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# 2. 安装 funasr（PyTorch 版）
+uv pip install funasr einops more_itertools
+
+# 3. 设置环境变量启动
+FUNASR_ASR_MODEL="iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch" \
+    python main.py --config ~/.vocotype_config.json
+```
+
+首次启动会自动下载模型 ~944MB（缓存到 `~/.cache/modelscope/hub/`）。
+
+Hyprland 自启动：
+
+```ini
+exec-once = bash -c 'FUNASR_ASR_MODEL="iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch" /path/to/venv/bin/python /path/to/main.py --config ~/.vocotype_config.json'
+```
+
+### PyTorch 模型 vs ONNX 量化对比
 
 ## 下载
 
