@@ -208,6 +208,7 @@ def _toggle(worker: TranscriptionWorker) -> None:
             )
     else:
         stats = worker.transcription_stats
+        _notify("录音中... 按 F2 停止")
         if stats["pending"] > 0:
             logger.info(
                 "开始录音（后台还有 %d 个转录任务正在处理）",

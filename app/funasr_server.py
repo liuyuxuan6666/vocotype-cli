@@ -441,12 +441,14 @@ class FunASRServer:
             # 执行ASR识别（根据模型类型使用不同接口）
             if hasattr(self.asr_model, "generate"):
                 # PyTorch 模型使用 generate 方法
-                asr_result = self.asr_model.generate(
-                    input=audio_path,
-                    batch_size_s=default_options["batch_size_s"],
-                    hotword=default_options["hotword"],
-                    cache={},
-                )
+                gen_kwargs: dict = {
+                    "input": audio_path,
+                    "batch_size_s": default_options["batch_size_s"],
+                    "cache": {},
+                }
+                if default_options.get("hotword"):
+                    gen_kwargs["hotword"] = default_options["hotword"]
+                asr_result = self.asr_model.generate(**gen_kwargs)
             else:
                 # ONNX 模型直接调用（funasr_onnx.Paraformer）
                 asr_result = self.asr_model([audio_path])
