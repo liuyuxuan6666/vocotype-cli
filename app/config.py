@@ -60,6 +60,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "method": "auto",
         "append_newline": False,
     },
+    "text_postprocess": {
+        "remove_fillers": True,
+        "fix_retractions": True,
+    },
     "logging": {"dir": "logs", "level": "INFO"},
 }
 

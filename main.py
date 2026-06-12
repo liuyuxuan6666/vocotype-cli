@@ -13,6 +13,7 @@ import sys as _sys
 from app import TranscriptionResult, TranscriptionWorker, load_config, type_text
 from app.plugins.dataset_recorder import wrap_result_handler
 from app.logging_config import setup_logging
+from app.text_postprocess import postprocess as pp_text
 
 
 logger = logging.getLogger(__name__)
@@ -63,13 +64,14 @@ def main() -> None:
     output_cfg = config.get("output", {})
     output_method = output_cfg.get("method", "auto")
     append_newline = output_cfg.get("append_newline", False)
+    pp_cfg = config.get("text_postprocess", {})
 
     _worker = TranscriptionWorker(
         config_path=args.config,
         on_result=None,
     )
 
-    _worker.on_result = _make_result_handler(output_method, append_newline, _worker)
+    _worker.on_result = _make_result_handler(output_method, append_newline, pp_cfg, _worker)
     if args.save_dataset:
         _worker.on_result = wrap_result_handler(_worker.on_result, _worker, args.dataset_dir)
 
@@ -137,24 +139,34 @@ def _cleanup_pid_file() -> None:
         logger.warning("无法清理 PID 文件 %s: %s", PID_FILE, exc)
 
 
-def _make_result_handler(output_method: str, append_newline: bool, worker: TranscriptionWorker):
+def _make_result_handler(output_method: str, append_newline: bool, pp_cfg: dict, worker: TranscriptionWorker):
     def _handle_result(result: TranscriptionResult) -> None:
         if result.error:
             logger.error("转写失败: %s", result.error)
             return
 
+        text = result.text
+
+        # Text post-processing: remove fillers + fix retractions
+        remove_fillers = pp_cfg.get("remove_fillers", True)
+        fix_retractions = pp_cfg.get("fix_retractions", True)
+        cleaned = pp_text(text, remove_fillers_flag=remove_fillers, fix_retractions_flag=fix_retractions)
+        if cleaned != text:
+            logger.info("后处理: '%s' → '%s'", text, cleaned)
+            text = cleaned
+
         stats = worker.transcription_stats
 
         logger.info(
             "转写成功: %s (推理 %.2fs) [已完成 %d/%d，队列剩余 %d]",
-            result.text,
+            text,
             result.inference_latency,
             stats["completed"],
             stats["submitted"],
             stats["pending"],
         )
         type_text(
-            result.text,
+            text,
             append_newline=append_newline,
             method=output_method,
         )
