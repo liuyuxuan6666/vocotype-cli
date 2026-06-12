@@ -310,7 +310,7 @@ else:
     _LINUX_METHOD_ORDER = {
         "wtype": ["wtype", "clipboard"],
         "clipboard": ["clipboard", "wtype"],
-        "auto": ["clipboard", "wtype"],
+        "auto": ["wtype", "clipboard"],
     }
 
 
@@ -321,6 +321,12 @@ def type_text(text: str, append_newline: bool = False, method: str = "auto") -> 
     if not text:
         return
 
+    # Resolve method — per-app override > explicit method > auto
+    if method == "auto" and sys.platform != "win32":
+        app_method = _detect_window_method(_app_methods_config)
+        if app_method:
+            method = app_method
+
     newline = "\r\n" if sys.platform == "win32" else "\n"
     payload = text + (newline if append_newline else "")
     logger.debug("注入文本: %s", payload)
@@ -329,6 +335,38 @@ def type_text(text: str, append_newline: bool = False, method: str = "auto") -> 
         _type_text_windows(payload, method)
     else:
         _type_text_linux(payload, method)
+
+
+# Per-app method overrides (set by set_app_methods_config)
+_app_methods_config: dict | None = None
+
+
+def set_app_methods_config(cfg: dict | None) -> None:
+    """Set per-application injection method mapping (called from main.py)."""
+    global _app_methods_config
+    _app_methods_config = cfg
+
+
+def _detect_window_method(app_map: dict | None) -> str | None:
+    """Return injection method for the currently focused window, or None."""
+    if not app_map:
+        return None
+    try:
+        import json as _json
+        info = _json.loads(
+            subprocess.run(
+                ["hyprctl", "activewindow", "-j"],
+                capture_output=True, timeout=2, text=True,
+            ).stdout
+        )
+        wclass = info.get("class", "") or ""
+        for pattern, method in app_map.items():
+            if pattern and method and pattern.lower() in wclass.lower():
+                logger.debug("按窗口 %s 选择方式: %s", wclass, method)
+                return method
+    except Exception as exc:
+        logger.debug("检测当前窗口失败: %s", exc)
+    return None
 
 
 def _type_text_windows(payload: str, method: str) -> None:

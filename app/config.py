@@ -59,6 +59,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "min_chars": 1,
         "method": "auto",
         "append_newline": False,
+        "app_methods": {
+            "sublime_text": "clipboard",
+        },
     },
     "text_postprocess": {
         "remove_fillers": True,

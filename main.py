@@ -14,6 +14,7 @@ from app import TranscriptionResult, TranscriptionWorker, load_config, type_text
 from app.plugins.dataset_recorder import wrap_result_handler
 from app.logging_config import setup_logging
 from app.text_postprocess import postprocess as pp_text
+from app.output import set_app_methods_config
 
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ def main() -> None:
     output_cfg = config.get("output", {})
     output_method = output_cfg.get("method", "auto")
     append_newline = output_cfg.get("append_newline", False)
+    set_app_methods_config(output_cfg.get("app_methods"))
     pp_cfg = config.get("text_postprocess", {})
 
     _worker = TranscriptionWorker(
