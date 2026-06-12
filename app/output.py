@@ -310,6 +310,7 @@ else:
     _LINUX_METHOD_ORDER = {
         "wtype": ["wtype", "clipboard"],
         "clipboard": ["clipboard", "wtype"],
+        "xdotool": ["xdotool", "clipboard"],
         "auto": ["clipboard", "wtype"],
     }
 
@@ -348,9 +349,11 @@ def set_app_methods_config(cfg: dict | None) -> None:
 
 
 def _detect_window_method(app_map: dict | None) -> str | None:
-    """Return injection method for the currently focused window, or None."""
-    if not app_map:
-        return None
+    """Return injection method for the currently focused window, or None.
+
+    - XWayland 窗口 → xdotool（wtype/clipboard 均不可靠）
+    - 其他窗口 → 按 app_map 匹配
+    """
     try:
         import json as _json
         info = _json.loads(
@@ -359,6 +362,13 @@ def _detect_window_method(app_map: dict | None) -> str | None:
                 capture_output=True, timeout=2, text=True,
             ).stdout
         )
+        # XWayland 窗口强制使用 xdotool
+        if info.get("xwayland"):
+            logger.debug("XWayland 窗口 (%s) → xdotool", info.get("class", ""))
+            return "xdotool"
+
+        if not app_map:
+            return None
         wclass = info.get("class", "") or ""
         for pattern, method in app_map.items():
             if pattern and method and pattern.lower() in wclass.lower():
@@ -393,9 +403,7 @@ def _type_text_linux(payload: str, method: str) -> None:
             return
         if mode == "clipboard" and _type_with_linux_clipboard(payload):
             return
-
-    # Last resort: try xdotool on X11
-    if not _is_wayland() and _type_with_xdotool(payload):
-        return
+        if mode == "xdotool" and _type_with_xdotool(payload):
+            return
 
     logger.error("所有文本注入方式均失败: %s", payload)
