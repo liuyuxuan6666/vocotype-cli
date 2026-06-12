@@ -8,6 +8,7 @@ import os
 import signal
 import threading
 import time
+import subprocess
 import sys as _sys
 
 from app import TranscriptionResult, TranscriptionWorker, load_config, type_text
@@ -176,6 +177,17 @@ def _make_result_handler(output_method: str, append_newline: bool, pp_cfg: dict,
     return _handle_result
 
 
+def _notify(msg: str, urgent: bool = False) -> None:
+    """Send desktop notification via notify-send (non-blocking)."""
+    try:
+        subprocess.Popen(
+            ["notify-send", "-a", "VocoType", "-t", "2000",
+             "-u", "critical" if urgent else "normal", msg],
+        )
+    except Exception:
+        pass
+
+
 def _toggle(worker: TranscriptionWorker) -> None:
     global _last_toggle_time
     now = time.monotonic()
@@ -187,6 +199,7 @@ def _toggle(worker: TranscriptionWorker) -> None:
 
     if worker.is_running:
         worker.stop()
+        _notify("录音已停止，正在转写...")
         stats = worker.transcription_stats
         if stats["pending"] > 0:
             logger.info(
